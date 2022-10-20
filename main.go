@@ -8,6 +8,7 @@ import (
 	"github.com/guptarohit/asciigraph"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/terminal"
 	"net"
 	"os"
 	"runtime/pprof"
@@ -17,16 +18,24 @@ import (
 	"time"
 	"unicode/utf8"
 	"unsafe" // TODO get terminal size in a nicer way
+	"strconv"
 )
 
 var logFile = flag.String("logfile", "log.jsonl", "Logfile")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var inFile = flag.String("input", "in.txt", "Text file with ip addresses")
-var parallel = flag.Int("p", 40000, "Parallelism, must be smaller than: net.ipv4.ip_local_port_range (second value - first value)")
+var parallel = flag.Int("t", 40000, "Parallelism, must be smaller than: net.ipv4.ip_local_port_range (second value - first value)")
+var port = flag.Int("p", 22, "SSH port")
 var username = flag.String("user", "", "SSH user")
 var password = flag.String("pass", "", "SSH password")
+var command = flag.String("cmd", "id", "SSH command")
 var srcIps = flag.String("src", "", "Comma separated list of source IP addresses to use")
 var localAddrs []*net.TCPAddr
+var logUser = flag.Bool("loguser", false, "Log user")
+var logPass = flag.Bool("logpass", false, "Log password")
+var loggedUser string = "-"
+var loggedPass string = "-"
+var interactivePass = flag.Bool("interactivepass", false, "Read password as console input")
 
 type Stats struct {
 	Mu                            sync.Mutex
@@ -69,13 +78,25 @@ const (
 	kexAlgoECDH256          = "ecdh-sha2-nistp256"
 	kexAlgoECDH384          = "ecdh-sha2-nistp384"
 	kexAlgoECDH521          = "ecdh-sha2-nistp521"
-	kexAlgoCurve25519SHA256 = "curve25519-sha256@libssh.org"
 	kexAlgoDHGEXSHA1        = "diffie-hellman-group-exchange-sha1"
 	kexAlgoDHGEXSHA256      = "diffie-hellman-group-exchange-sha256"
+        kexAlgoDH14SHA256             = "diffie-hellman-group14-sha256"
+        kexAlgoCurve25519SHA256LibSSH = "curve25519-sha256@libssh.org"
+        kexAlgoCurve25519SHA256       = "curve25519-sha256"
 )
 
+//https://github.com/golang/crypto/blob/master/ssh/common.go
+var supportedCiphers = []string{
+	"aes128-ctr", "aes192-ctr", "aes256-ctr",
+	"aes128-gcm@openssh.com",
+	"arcfour256", "arcfour128", "arcfour",
+	"aes128-cbc",
+	"3des-cbc",
+}
+
+
 var supportedKexAlgos = []string{
-	kexAlgoDH1SHA1, kexAlgoDH14SHA1, kexAlgoECDH256, kexAlgoECDH384, kexAlgoECDH521, kexAlgoCurve25519SHA256,
+	kexAlgoDH1SHA1, kexAlgoDH14SHA1, kexAlgoECDH256, kexAlgoECDH384, kexAlgoECDH521, kexAlgoDHGEXSHA256, kexAlgoDH14SHA256, kexAlgoCurve25519SHA256LibSSH, kexAlgoCurve25519SHA256, kexAlgoDHGEXSHA1,
 }
 
 const maxHistorySize int = 256
@@ -118,7 +139,7 @@ func DoSearch() {
 					addr := &net.TCPAddr{
 						IP: ip,
 					}
-					TestConnection(line, logger.WithFields(log.Fields{"ip": line, "src": a}), addr)
+					TestConnection(line, logger.WithFields(log.Fields{"user": loggedUser, "pass": loggedPass, "ip": line, "src": a}), addr)
 				}
 				stats.Mu.Lock()
 				stats.ActiveWorkers -= 1
@@ -197,7 +218,7 @@ func TestConnection(host string, logger *log.Entry, localAddr *net.TCPAddr) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 
-	tcpConn, err := klingeling.DialContext(ctx, "tcp", net.JoinHostPort(host, "22"))
+	tcpConn, err := klingeling.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(*port)))
 	defer func() {
 		stats.Mu.Lock()
 		stats.ActiveTcpConnectionCount -= 1
@@ -242,6 +263,7 @@ func TestConnection(host string, logger *log.Entry, localAddr *net.TCPAddr) {
 			Timeout: 12 * time.Second,
 			Config: ssh.Config{
 				KeyExchanges: supportedKexAlgos,
+				Ciphers: supportedCiphers,
 			},
 		}
 
@@ -368,7 +390,7 @@ func TestConnection(host string, logger *log.Entry, localAddr *net.TCPAddr) {
 		stats.ActiveCmdRunCount += 1
 		stats.Mu.Unlock()
 
-		res, err := sshSession.CombinedOutput("id")
+		res, err := sshSession.CombinedOutput(*command)
 		if err != nil {
 			stats.Mu.Lock()
 			stats.FailedCmdRunCount += 1
@@ -456,6 +478,19 @@ func setLimits() {
 func main() {
 	setLimits()
 	flag.Parse()
+	// Log user or pass
+	if *logUser {
+		loggedUser = *username
+	}
+	if *logPass {
+		loggedPass = *password
+	}
+	// Read pass as console input
+	if *interactivePass {
+		fmt.Print("Password: ")
+		input, _ := terminal.ReadPassword(int(os.Stdin.Fd()))
+		*password = string(input)
+	}
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
