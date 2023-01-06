@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 	"unsafe" // TODO get terminal size in a nicer way
 	"strconv"
+	"text/tabwriter"
 )
 
 var logFile = flag.String("logfile", "log.jsonl", "Logfile")
@@ -57,16 +58,22 @@ type Stats struct {
 
 func (s *Stats) Print() {
 	fmt.Println("\n\n\n")
-	fmt.Printf("Status\tTCP Connections\tSSH Connections\tSSSH Sessions\tSSH Cmd\n")
-	fmt.Printf("Active\t%.0f\t%.0f\t%.0f\t%.0f\n", s.ActiveTcpConnectionCount, s.ActiveSshConnectionCount, s.ActiveSshSessionCount, s.ActiveCmdRunCount)
-	fmt.Printf("Failed\t%.0f\t%.0f\t%.0f\t%.0f\n", s.FailedTcpConnectionCount, s.FailedSshConnectionCount, s.FailedSshSessionCount, s.FailedCmdRunCount)
-	fmt.Printf("Success\t%.0f\t%.0f\t%.0f\t%.0f\n", s.SuccessfullTcpConnectionCount, s.SuccessfullSshConnectionCount, s.SuccessfullSshSessionCount, s.SuccessfullCmdRunCount)
+        w := new(tabwriter.Writer)
+        // minwidth, tabwidth, padding, padchar, flags
+        w.Init(os.Stdout, 20, 8, 0, '\t', 0)
+
+        fmt.Fprintf(w, "\n %s\t%s\t%s\t%s\t%s", "Status", "TCP Connections", "SSH Connections", "SSH Sessions", "SSH Command")
+	fmt.Fprintf(w, "\n %s\t%.0f\t%.0f\t%.0f\t%.0f", "Active", s.ActiveTcpConnectionCount, s.ActiveSshConnectionCount, s.ActiveSshSessionCount, s.ActiveCmdRunCount)
+	fmt.Fprintf(w, "\n %s\t%.0f\t%.0f\t%.0f\t%.0f", "Failed", s.FailedTcpConnectionCount, s.FailedSshConnectionCount, s.FailedSshSessionCount, s.FailedCmdRunCount)
+	fmt.Fprintf(w, "\n %s\t%.0f\t%.0f\t%.0f\t%.0f", "Success", s.SuccessfullTcpConnectionCount, s.SuccessfullSshConnectionCount, s.SuccessfullSshSessionCount, s.SuccessfullCmdRunCount)
+
 	secs := time.Since(start).Seconds()
 	tcpRate := (s.FailedTcpConnectionCount + s.SuccessfullTcpConnectionCount) / secs
 	sshConnRate := (s.FailedSshConnectionCount + s.SuccessfullSshConnectionCount) / secs
 	sshSessRate := (s.FailedSshSessionCount + s.SuccessfullSshSessionCount) / secs
 	cmdRate := (s.FailedCmdRunCount + s.SuccessfullCmdRunCount) / secs
-	fmt.Printf("Rates \t%.0f\t%.3f\t%.3f\t%.3f\n", tcpRate, sshConnRate, sshSessRate, cmdRate)
+	fmt.Fprintf(w, "\n %s\t%.0f\t%.3f\t%.3f\t%.3f\n", "Rates", tcpRate, sshConnRate, sshSessRate, cmdRate)
+        w.Flush()
 }
 
 var stats Stats
