@@ -57,7 +57,7 @@ type Stats struct {
 }
 
 func (s *Stats) Print() {
-	fmt.Println("\n\n\n")
+	fmt.Print("\n\n\n\n")
         w := new(tabwriter.Writer)
         // minwidth, tabwidth, padding, padchar, flags
         w.Init(os.Stdout, 20, 8, 0, '\t', 0)
